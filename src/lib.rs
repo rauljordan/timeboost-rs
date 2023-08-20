@@ -81,6 +81,7 @@ impl TimeBoostService {
     }
 }
 
+// Small helper to get the unix timestamp in milliseconds.
 fn unix_millis_now() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -118,6 +119,7 @@ impl PartialEq for BoostableTx {
 impl PartialOrd for BoostableTx {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match self.bid.cmp(&other.bid) {
+            // TODO: earlier timestamps should be superior
             Ordering::Equal => self.timestamp_millis.partial_cmp(&other.timestamp_millis),
             Ordering::Greater => Some(Ordering::Greater),
             Ordering::Less => Some(Ordering::Less),
@@ -166,22 +168,66 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn normalization_no_bid_no_boost() {}
+    async fn normalization_no_bid_no_boost() {
+        let (tx_feed, mut timeboost_output_feed) = broadcast::channel(100);
+        let mut service = TimeBoostService::new(tx_feed);
+
+        // Obtain a channel handle to send txs to the TimeBoostService.
+        let sender = service.sender();
+
+        // Spawn a dedicated thread for the time boost service.
+        std::thread::spawn(move || service.run());
+
+        // Prepare a list of txs with 0 bid and monotonically increasing timestamp.
+        let original_txs = vec![
+            bid!(
+                0, /* ID */
+                0, /* bid */
+                1  /* unix timestamp millis */
+            ),
+            bid!(1, 0, 2),
+            bid!(2, 0, 3),
+            bid!(3, 0, 4),
+        ];
+        for tx in original_txs.iter() {
+            sender.send(tx.clone()).unwrap();
+        }
+
+        let mut txs = vec![];
+        for _ in 0..4 {
+            let tx = timeboost_output_feed.recv().await.unwrap();
+            txs.push(tx);
+        }
+
+        // Assert we received 4 txs from the output feed.
+        assert_eq!(txs.len(), 4);
+
+        // Assert the output is the same as the input input, as transactions had no bids present
+        // to create any reordering in the output sequence.
+        let want = original_txs.into_iter().map(|tx| tx.id).collect::<Vec<_>>();
+        let got = txs.into_iter().map(|tx| tx.id).collect::<Vec<_>>();
+        assert_eq!(want, got);
+    }
 
     #[tokio::test]
-    async fn max_bid_offers_no_additional_boost() {}
+    async fn tx_arrived_until_next_boost_round() {}
+
+    #[tokio::test]
+    async fn three_boost_rounds() {}
 
     #[tokio::test]
     async fn bid_just_high_enough_to_boost() {}
 
     #[tokio::test]
-    async fn bid_not_high_enough_to_boost() {}
+    async fn all_equal_bids_tiebreak_by_timestamp() {}
 
     #[tokio::test]
     async fn timeboost_same_interval_sort_by_bid() {
         // TODO: Decide on capacity.
         let (tx_feed, mut timeboost_output_feed) = broadcast::channel(100);
         let mut service = TimeBoostService::new(tx_feed);
+
+        // Obtain a channel handle to send txs to the TimeBoostService.
         let sender = service.sender();
 
         // Spawn a dedicated thread for the time boost service.
