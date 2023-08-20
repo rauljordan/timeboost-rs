@@ -3,6 +3,7 @@ use std::cmp::{Eq, Ord, Ordering, PartialOrd};
 use std::collections::BinaryHeap;
 use std::time::{Duration, SystemTime};
 use tokio::sync::broadcast;
+use tracing::error;
 
 const DEFAULT_MAX_BOOST_FACTOR: u64 = 500;
 
@@ -49,7 +50,7 @@ impl TimeBoostService {
                 recv(self.txs_recv) -> tx => {
                     match tx {
                         Ok(tx) => self.tx_heap.push(tx),
-                        Err(e) => println!("Got receive error from tx channel: {}", e),
+                        Err(e) => error!("TimeBoostService got receive error from tx input channel: {}", e),
                     }
                 },
                 default(Duration::from_millis(self.g_factor)) => {
@@ -57,12 +58,17 @@ impl TimeBoostService {
                     // until the queue is empty and then we can restart the timer once again.
                     while let Some(tx) = self.tx_heap.pop() {
                         let output_tx = BoostableTx {
+                            id: tx.id,
                             bid: tx.bid,
+                            // The output sequence must have monotonically increasing timestamps,
+                            // so if we had a reordering by bid, we preserve this property by outputting
+                            // a transaction with a new timestamp representing the time it is emitted
+                            // into the output feed.
                             timestamp_millis: unix_millis_now(),
                         };
                         if let Err(e) = self.output_feed.send(output_tx) {
-                            println!(
-                                "Got send error when broadcasting tx into output sequence: {}",
+                            error!(
+                                "TimeBoostService got send error when broadcasting tx into output sequence: {}",
                                 e,
                             );
                         }
@@ -84,14 +90,16 @@ fn unix_millis_now() -> u64 {
 
 #[derive(Debug, Clone, Eq)]
 pub struct BoostableTx {
+    id: u64,
     bid: u64,
     timestamp_millis: u64,
 }
 
 impl BoostableTx {
     #[allow(dead_code)]
-    fn new(bid: u64, timestamp_millis: u64) -> Self {
+    fn new(id: u64, bid: u64, timestamp_millis: u64) -> Self {
         Self {
+            id,
             bid,
             timestamp_millis,
         }
@@ -100,7 +108,9 @@ impl BoostableTx {
 
 impl PartialEq for BoostableTx {
     fn eq(&self, other: &Self) -> bool {
-        self.bid == other.bid && self.timestamp_millis == other.timestamp_millis
+        self.id == other.id
+            && self.bid == other.bid
+            && self.timestamp_millis == other.timestamp_millis
     }
 }
 
@@ -150,8 +160,8 @@ mod tests {
     use super::*;
 
     macro_rules! bid {
-        ($bid:expr, $millis:expr) => {
-            BoostableTx::new($bid, $millis)
+        ($id:expr, $bid:expr, $millis:expr) => {
+            BoostableTx::new($id, $bid, $millis)
         };
     }
 
@@ -179,13 +189,17 @@ mod tests {
 
         // Prepare a list of time boostable txs with bids and timestamps
         let mut original_txs = vec![
-            bid!(1, 0),
-            bid!(2, 1),
-            bid!(3, 2),
-            bid!(4, 3),
-            bid!(5, 4),
-            bid!(6, 5),
-            bid!(7, 6),
+            bid!(
+                0, /* ID */
+                1, /* bid */
+                0  /* unix timestamp millis */
+            ),
+            bid!(1, 2, 1),
+            bid!(2, 3, 2),
+            bid!(3, 4, 3),
+            bid!(4, 5, 4),
+            bid!(5, 6, 5),
+            bid!(6, 7, 6),
         ];
         for tx in original_txs.iter() {
             sender.send(tx.clone()).unwrap();
@@ -203,11 +217,8 @@ mod tests {
         // Assert the output is the same as the reversed input, as
         // the highest bid txs will be released first.
         original_txs.reverse();
-        let want = original_txs
-            .into_iter()
-            .map(|tx| tx.bid)
-            .collect::<Vec<_>>();
-        let got = txs.into_iter().map(|tx| tx.bid).collect::<Vec<_>>();
+        let want = original_txs.into_iter().map(|tx| tx.id).collect::<Vec<_>>();
+        let got = txs.into_iter().map(|tx| tx.id).collect::<Vec<_>>();
         assert_eq!(want, got);
     }
 }
