@@ -16,7 +16,9 @@ use tokio::sync::broadcast;
 use tracing::error;
 
 lazy_static! {
-    static ref TIME_BOOST_ROUNDS_TOTAL: IntCounter = register_int_counter!(
+    /// The number of elapsed time boost rounds, which occur in intervals of G milliseconds,
+    /// exposed as prometheus int counter.
+    pub static ref TIME_BOOST_ROUNDS_TOTAL: IntCounter = register_int_counter!(
         "timeboost_rounds_total",
         "Number of time boost rounds elapsed"
     )
