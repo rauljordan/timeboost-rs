@@ -39,6 +39,51 @@ pub const DEFAULT_INPUT_FEED_BUFFER_CAP: usize = 1000;
 /// At the end of each round of "G" milliseconds, the service will release all the transactions
 /// that were in the priority queue and start the next round. The timestamps of transactions in the output
 /// feed are the timestamp at the time of release from the priority queue.
+///
+/// We recommend running the TimeBoostService in a dedicated thread, and handles can be acquired from it to send
+/// transactions for it to enqueue and process. Here's a setup example:
+///
+/// ```
+/// use timeboost_rs::{TimeBoostService, BoostableTx};
+/// use tokio::sync::broadcast;
+///
+/// #[tokio::main]
+/// async fn main() {
+///     let (tx_output_feed, mut rx) = broadcast::channel(100);
+///     let mut service = TimeBoostService::new(tx_output_feed);
+///
+///     // Obtain a channel handle to send txs to the TimeBoostService.
+///     let sender = service.sender();
+///
+///     // Spawn a dedicated thread for the time boost service.
+///     std::thread::spawn(move || service.run());
+///
+///     let mut txs = vec![
+///         BoostableTx::new(0 /* id */, 1 /* bid */, 100 /* unix timestamp millis */),
+///         BoostableTx::new(1 /* id */, 100 /* bid */, 101 /* unix timestamp millis */),
+///     ];
+///
+///     for tx in txs.iter() {
+///         sender.send(tx.clone()).unwrap();
+///     }
+///
+///     let mut got_txs = vec![];
+///     for _ in 0..2 {
+///         let tx = rx.recv().await.unwrap();
+///         got_txs.push(tx);
+///     }
+///
+///     // Assert we received 2 txs from the output feed.
+///     assert_eq!(txs.len(), 2);
+///
+///     // Assert the output is the same as the reversed input, as
+///     // the highest bid txs will be released first.
+///     txs.reverse();
+///     let want = txs.into_iter().map(|tx| tx.id).collect::<Vec<_>>();
+///     let got = got_txs.into_iter().map(|tx| tx.id).collect::<Vec<_>>();
+///     assert_eq!(want, got);
+/// }
+/// ```
 pub struct TimeBoostService {
     g_factor: u64,
     tx_sender: Sender<BoostableTx>,
@@ -124,14 +169,13 @@ impl TimeBoostService {
 /// at intervals of G milliseconds.
 #[derive(Debug, Clone, Eq)]
 pub struct BoostableTx {
-    id: u64,
-    bid: u64,
-    timestamp: NaiveDateTime,
+    pub id: u64,
+    pub bid: u64,
+    pub timestamp: NaiveDateTime,
 }
 
 impl BoostableTx {
-    #[allow(dead_code)]
-    fn new(id: u64, bid: u64, timestamp_millis: u64) -> Self {
+    pub fn new(id: u64, bid: u64, timestamp_millis: u64) -> Self {
         Self {
             id,
             bid,
