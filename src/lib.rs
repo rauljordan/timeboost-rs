@@ -27,7 +27,7 @@ lazy_static! {
 
 /// A default max boost factor, set to 500ms after empirical evaluations for Ethereum Layer 2s from
 /// the time boost paper. Can be adjusted using the `g_factor` method when building
-/// a TimeBoostService struct.
+/// a [`TimeBoostService`] struct.
 pub const DEFAULT_MAX_BOOST_FACTOR: u64 = 500;
 
 /// The default capacity for the transaction input channel used by [`TimeBoostService`] to receive txs
