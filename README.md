@@ -46,6 +46,18 @@ let mut service = TimeBoostService::new(tx_output_feed)
                     .g_factor(200 /* millis */);
 ```
 
+The transactions set into this service are of type `BoostableTx` which are simple structs with three fields:
+
+```rust
+pub struct BoostableTx {
+    pub id: u64,
+    pub bid: u64,
+    pub timestamp: NaiveDateTime,
+}
+```
+
+`BoostableTx`s implement the `Ord` trait according to the time boost specification, meaning they are sorted by max bid with tiebreaks by earliest timestamp. To use custom tx types with the `TimeBoostService`, implement the `From` trait for your type.
+
 Here's a full example of using time boost, sending txs into it, and receiving its output:
 
 ```rust
