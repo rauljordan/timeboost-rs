@@ -74,8 +74,8 @@ async fn main() {
     std::thread::spawn(move || service.run());
 
     let mut txs = vec![
-        BoostableTx::new(0 /* id */, 1 /* bid */, 100 /* unix timestamp millis */),
-        BoostableTx::new(1 /* id */, 100 /* bid */, 101 /* unix timestamp millis */),
+        BoostableTx::new("a" /* id */, 1 /* bid */, 100 /* unix timestamp millis */),
+        BoostableTx::new("b" /* id */, 100 /* bid */, 101 /* unix timestamp millis */),
     ];
 
     // Send the txs to the time boost service.
