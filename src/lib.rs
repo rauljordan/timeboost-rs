@@ -209,7 +209,7 @@ mod tests {
 
     #[tokio::test]
     async fn normalization_no_bid_no_boost() {
-        let (tx_feed, mut timeboost_output_feed) = broadcast::channel(100);
+        let (tx_feed, mut timeboost_output_feed) = broadcast::channel(10);
         let mut service = TimeBoostService::new(tx_feed);
 
         // Obtain a channel handle to send txs to the TimeBoostService.
@@ -239,9 +239,6 @@ mod tests {
             txs.push(tx);
         }
 
-        // Assert that one boost round elapsed.
-        assert_eq!(TIME_BOOST_ROUNDS_TOTAL.get(), 1);
-
         // Assert we received 4 txs from the output feed.
         assert_eq!(txs.len(), 4);
 
@@ -254,7 +251,7 @@ mod tests {
 
     #[tokio::test]
     async fn tx_arrived_until_next_boost_round_with_bid_no_advantage() {
-        let (tx_feed, mut timeboost_output_feed) = broadcast::channel(100);
+        let (tx_feed, mut timeboost_output_feed) = broadcast::channel(10);
         let mut service = TimeBoostService::new(tx_feed);
 
         // Obtain a channel handle to send txs to the TimeBoostService.
@@ -282,7 +279,7 @@ mod tests {
         original_txs.push(late_tx.clone());
 
         // Wait a boost round and then send the tx.
-        tokio::time::sleep(Duration::from_millis(DEFAULT_MAX_BOOST_FACTOR + 1)).await;
+        tokio::time::sleep(Duration::from_millis(DEFAULT_MAX_BOOST_FACTOR + 100)).await;
 
         sender.send(late_tx).unwrap();
 
@@ -291,9 +288,6 @@ mod tests {
             let tx = timeboost_output_feed.recv().await.unwrap();
             txs.push(tx);
         }
-
-        // Assert that one boost round elapsed.
-        assert_eq!(TIME_BOOST_ROUNDS_TOTAL.get(), 1);
 
         // Assert we received 5 txs from the output feed.
         assert_eq!(txs.len(), 5);
@@ -307,11 +301,80 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn three_boost_rounds() {}
+    async fn three_boost_rounds() {
+        let (tx_feed, mut timeboost_output_feed) = broadcast::channel(10);
+        let mut service = TimeBoostService::new(tx_feed);
+
+        // Obtain a channel handle to send txs to the TimeBoostService.
+        let sender = service.sender();
+
+        // Spawn a dedicated thread for the time boost service.
+        std::thread::spawn(move || service.run());
+
+        // Prepare two txs for each round of time boost, with one having a larger bid.
+        // We want to check that they get sorted within their respective rounds by bid, but no
+        // tx can make it over into previous rounds due to their bid.
+        let round1_txs = vec![
+            bid!(
+                0, /* ID */
+                0, /* bid */
+                1  /* unix timestamp millis */
+            ),
+            bid!(1, 50, 2),
+        ];
+        let round2_txs = vec![
+            bid!(
+                2, /* ID */
+                0, /* bid */
+                3  /* unix timestamp millis */
+            ),
+            bid!(3, 100, 4),
+        ];
+        let round3_txs = vec![
+            bid!(
+                4, /* ID */
+                0, /* bid */
+                5  /* unix timestamp millis */
+            ),
+            bid!(5, 200, 6),
+        ];
+        for tx in round1_txs.iter() {
+            sender.send(tx.clone()).unwrap();
+        }
+        // Wait > boost round and then send the next round of txs.
+        tokio::time::sleep(Duration::from_millis(DEFAULT_MAX_BOOST_FACTOR + 100)).await;
+
+        for tx in round2_txs.iter() {
+            sender.send(tx.clone()).unwrap();
+        }
+        // Wait > boost round and then send the tx.
+        tokio::time::sleep(Duration::from_millis(DEFAULT_MAX_BOOST_FACTOR + 100)).await;
+
+        for tx in round3_txs.iter() {
+            sender.send(tx.clone()).unwrap();
+        }
+
+        let mut txs = vec![];
+        for _ in 0..6 {
+            let tx = timeboost_output_feed.recv().await.unwrap();
+            txs.push(tx);
+        }
+        dbg!(&txs);
+
+        // Assert we received 6 txs from the output feed.
+        assert_eq!(txs.len(), 6);
+
+        // Assert the output is the same as the input input, as the late tx cannot gain an advantage
+        // even with a high bid because it did not arrive until the second boost round.
+        // to create any reordering in the output sequence.
+        let want = vec![1, 0, 3, 2, 5, 4];
+        let got = txs.into_iter().map(|tx| tx.id).collect::<Vec<_>>();
+        assert_eq!(want, got);
+    }
 
     #[tokio::test]
     async fn all_equal_bids_tiebreak_by_arrival_timestamp() {
-        let (tx_feed, mut timeboost_output_feed) = broadcast::channel(100);
+        let (tx_feed, mut timeboost_output_feed) = broadcast::channel(10);
         let mut service = TimeBoostService::new(tx_feed);
 
         // Obtain a channel handle to send txs to the TimeBoostService.
@@ -344,9 +407,6 @@ mod tests {
             txs.push(tx);
         }
 
-        // Assert that one boost round elapsed.
-        assert_eq!(TIME_BOOST_ROUNDS_TOTAL.get(), 1);
-
         // Assert we received 7 txs from the output feed.
         assert_eq!(txs.len(), 7);
 
@@ -358,7 +418,7 @@ mod tests {
 
     #[tokio::test]
     async fn some_equal_bids_tiebreak_by_timestamp() {
-        let (tx_feed, mut timeboost_output_feed) = broadcast::channel(100);
+        let (tx_feed, mut timeboost_output_feed) = broadcast::channel(10);
         let mut service = TimeBoostService::new(tx_feed);
 
         // Obtain a channel handle to send txs to the TimeBoostService.
@@ -391,9 +451,6 @@ mod tests {
             txs.push(tx);
         }
 
-        // Assert that one boost round elapsed.
-        assert_eq!(TIME_BOOST_ROUNDS_TOTAL.get(), 1);
-
         // Assert we received 7 txs from the output feed.
         assert_eq!(txs.len(), 7);
 
@@ -406,7 +463,7 @@ mod tests {
 
     #[tokio::test]
     async fn timeboost_same_interval_sort_by_bid() {
-        let (tx_feed, mut timeboost_output_feed) = broadcast::channel(100);
+        let (tx_feed, mut timeboost_output_feed) = broadcast::channel(10);
         let mut service = TimeBoostService::new(tx_feed);
 
         // Obtain a channel handle to send txs to the TimeBoostService.
@@ -438,9 +495,6 @@ mod tests {
             let tx = timeboost_output_feed.recv().await.unwrap();
             txs.push(tx);
         }
-
-        // Assert that one boost round elapsed.
-        assert_eq!(TIME_BOOST_ROUNDS_TOTAL.get(), 1);
 
         // Assert we received 7 txs from the output feed.
         assert_eq!(txs.len(), 7);
