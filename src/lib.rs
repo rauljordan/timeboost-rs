@@ -33,7 +33,7 @@ pub const DEFAULT_MAX_BOOST_FACTOR: u64 = 500;
 /// The default capacity for the transaction input channel used by [`TimeBoostService`] to receive txs
 /// from outside sources. Can be adjusted using the `input_feed_buffer_capacity` method when building
 /// a TimeBoostService struct.
-pub const DEFAULT_INPUT_FEED_BUFFER_CAP: usize = 1000;
+pub const DEFAULT_INPUT_FEED_BUFFER_CAP: usize = 100;
 
 /// The TimeBoostService struct is a long-running service that will receive transactions from an input channel,
 /// push them to a priority queue where they are sorted by max bid, and then releases them at
@@ -62,8 +62,8 @@ pub const DEFAULT_INPUT_FEED_BUFFER_CAP: usize = 1000;
 ///     std::thread::spawn(move || service.run());
 ///
 ///     let mut txs = vec![
-///         BoostableTx::new(0 /* id */, 1 /* bid */, 100 /* unix timestamp millis */),
-///         BoostableTx::new(1 /* id */, 100 /* bid */, 101 /* unix timestamp millis */),
+///         BoostableTx::new("a" /* id */, 1 /* bid */, 100 /* unix timestamp millis */),
+///         BoostableTx::new("b" /* id */, 100 /* bid */, 101 /* unix timestamp millis */),
 ///     ];
 ///
 ///     for tx in txs.iter() {
@@ -87,19 +87,19 @@ pub const DEFAULT_INPUT_FEED_BUFFER_CAP: usize = 1000;
 ///     assert_eq!(want, got);
 /// }
 /// ```
-pub struct TimeBoostService {
+pub struct TimeBoostService<T: AsRef<str> + Eq> {
     g_factor: u64,
-    tx_sender: Sender<BoostableTx>,
-    txs_recv: Receiver<BoostableTx>,
-    tx_heap: Mutex<BinaryHeap<BoostableTx>>,
-    output_feed: broadcast::Sender<BoostableTx>,
+    tx_sender: Sender<BoostableTx<T>>,
+    txs_recv: Receiver<BoostableTx<T>>,
+    tx_heap: Mutex<BinaryHeap<BoostableTx<T>>>,
+    output_feed: broadcast::Sender<BoostableTx<T>>,
     next_round_sender: Sender<()>,
     start_next_round: Receiver<()>,
 }
 
-impl TimeBoostService {
+impl<T: AsRef<str> + Eq> TimeBoostService<T> {
     /// Takes in an output feed for broadcasting txs released by the TimeBoostService.
-    pub fn new(output_feed: broadcast::Sender<BoostableTx>) -> Self {
+    pub fn new(output_feed: broadcast::Sender<BoostableTx<T>>) -> Self {
         let (tx_sender, txs_recv) = bounded(DEFAULT_INPUT_FEED_BUFFER_CAP);
         let (next_round_sender, start_next_round) = bounded(1);
         TimeBoostService {
@@ -132,7 +132,7 @@ impl TimeBoostService {
     }
     // Entities wishing to send boostable txs to the timeboost service can acquire
     // a handle to the sender channel via this method.
-    pub fn sender(&self) -> Sender<BoostableTx> {
+    pub fn sender(&self) -> Sender<BoostableTx<T>> {
         self.tx_sender.clone()
     }
     // Entities wishing to send boostable txs to the timeboost service can acquire
@@ -194,14 +194,14 @@ impl TimeBoostService {
 /// Bid and timestamp values are used when performing the time boost protocol by the [`TimeBoostService`]
 /// at intervals of G milliseconds.
 #[derive(Debug, Clone, Eq)]
-pub struct BoostableTx {
-    pub id: u64,
+pub struct BoostableTx<T: AsRef<str>> {
+    pub id: T,
     pub bid: u64,
     pub timestamp: NaiveDateTime,
 }
 
-impl BoostableTx {
-    pub fn new(id: u64, bid: u64, timestamp_millis: u64) -> Self {
+impl<T: AsRef<str>> BoostableTx<T> {
+    pub fn new(id: T, bid: u64, timestamp_millis: u64) -> Self {
         Self {
             id,
             bid,
@@ -212,14 +212,14 @@ impl BoostableTx {
 }
 
 /// We consider a boostable tx equal if all its fields are equal.
-impl PartialEq for BoostableTx {
+impl<T: AsRef<str> + Eq> PartialEq for BoostableTx<T> {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id && self.bid == other.bid && self.timestamp == other.timestamp
     }
 }
 
 /// BoostableTx are comparable by bid and ties are broken by timestamp.
-impl PartialOrd for BoostableTx {
+impl<T: AsRef<str> + Eq> PartialOrd for BoostableTx<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match self.bid.cmp(&other.bid) {
             Ordering::Equal => {
@@ -237,7 +237,7 @@ impl PartialOrd for BoostableTx {
     }
 }
 
-impl Ord for BoostableTx {
+impl<T: AsRef<str> + Eq> Ord for BoostableTx<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap()
     }
@@ -291,13 +291,13 @@ mod tests {
         // Prepare a list of txs with 0 bid and monotonically increasing timestamp.
         let original_txs = vec![
             bid!(
-                0, /* ID */
-                0, /* bid */
-                1  /* unix timestamp millis */
+                "a", /* ID */
+                0,   /* bid */
+                1    /* unix timestamp millis */
             ),
-            bid!(1, 0, 2),
-            bid!(2, 0, 3),
-            bid!(3, 0, 4),
+            bid!("b", 0, 2),
+            bid!("c", 0, 3),
+            bid!("d", 0, 4),
         ];
         for tx in original_txs.iter() {
             sender.send(tx.clone()).unwrap();
@@ -334,19 +334,19 @@ mod tests {
         // Prepare a list of txs with 0 bid and monotonically increasing timestamp.
         let mut original_txs = vec![
             bid!(
-                0, /* ID */
-                0, /* bid */
-                1  /* unix timestamp millis */
+                "a", /* ID */
+                0,   /* bid */
+                1    /* unix timestamp millis */
             ),
-            bid!(1, 0, 2),
-            bid!(2, 0, 3),
-            bid!(3, 0, 4),
+            bid!("b", 0, 2),
+            bid!("c", 0, 3),
+            bid!("d", 0, 4),
         ];
         for tx in original_txs.iter() {
             sender.send(tx.clone()).unwrap();
         }
 
-        let late_tx = bid!(4, 100 /* large bid */, 4 + DEFAULT_MAX_BOOST_FACTOR);
+        let late_tx = bid!("e", 100 /* large bid */, 4 + DEFAULT_MAX_BOOST_FACTOR);
         original_txs.push(late_tx.clone());
 
         // Wait a boost round and then send the tx.
@@ -391,27 +391,27 @@ mod tests {
         // tx can make it over into previous rounds due to their bid.
         let round1_txs = vec![
             bid!(
-                0, /* ID */
-                0, /* bid */
-                1  /* unix timestamp millis */
+                "a", /* ID */
+                0,   /* bid */
+                1    /* unix timestamp millis */
             ),
-            bid!(1, 50, 2),
+            bid!("b", 50, 2),
         ];
         let round2_txs = vec![
             bid!(
-                2, /* ID */
-                0, /* bid */
-                3  /* unix timestamp millis */
+                "c", /* ID */
+                0,   /* bid */
+                3    /* unix timestamp millis */
             ),
-            bid!(3, 100, 4),
+            bid!("d", 100, 4),
         ];
         let round3_txs = vec![
             bid!(
-                4, /* ID */
-                0, /* bid */
-                5  /* unix timestamp millis */
+                "e", /* ID */
+                0,   /* bid */
+                5    /* unix timestamp millis */
             ),
-            bid!(5, 200, 6),
+            bid!("f", 200, 6),
         ];
         for tx in round1_txs.iter() {
             sender.send(tx.clone()).unwrap();
@@ -450,7 +450,7 @@ mod tests {
         // Assert the output is the same as the input input, as the late tx cannot gain an advantage
         // even with a high bid because it did not arrive until the second boost round.
         // to create any reordering in the output sequence.
-        let want = vec![1, 0, 3, 2, 5, 4];
+        let want = vec!["b", "a", "d", "c", "f", "e"];
         let got = txs.into_iter().map(|tx| tx.id).collect::<Vec<_>>();
         assert_eq!(want, got);
     }
@@ -469,16 +469,16 @@ mod tests {
         // Prepare a list of time boostable txs with all bids equal.
         let original_txs = vec![
             bid!(
-                0,   /* ID */
+                "a", /* ID */
                 100, /* bid */
                 0    /* unix timestamp millis */
             ),
-            bid!(1, 100, 3),
-            bid!(2, 100, 2), // The two below have the same bid, and we expect tiebreaks by timestamp if this is the case.
-            bid!(3, 100, 1),
-            bid!(4, 100, 6), // The two below have the same bid.
-            bid!(5, 100, 5),
-            bid!(6, 100, 4), // Highest bid, will come first in the output.
+            bid!("b", 100, 3),
+            bid!("c", 100, 2), // The two below have the same bid, and we expect tiebreaks by timestamp if this is the case.
+            bid!("d", 100, 1),
+            bid!("e", 100, 6), // The two below have the same bid.
+            bid!("f", 100, 5),
+            bid!("g", 100, 4), // Highest bid, will come first in the output.
         ];
         for tx in original_txs.iter() {
             sender.send(tx.clone()).unwrap();
@@ -495,7 +495,7 @@ mod tests {
 
         // Expect txs to be sorted by arrival timestamp as all bids were equal.
         let got = txs.into_iter().map(|tx| tx.id).collect::<Vec<_>>();
-        let want: Vec<u64> = vec![0, 3, 2, 1, 6, 5, 4];
+        let want = vec!["a", "d", "c", "b", "g", "f", "e"];
         assert_eq!(want, got);
     }
 
@@ -513,16 +513,16 @@ mod tests {
         // Prepare a list of time boostable txs with some bids equal.
         let original_txs = vec![
             bid!(
-                0, /* ID */
-                1, /* bid */
-                0  /* unix timestamp millis */
+                "a", /* ID */
+                1,   /* bid */
+                0    /* unix timestamp millis */
             ),
-            bid!(1, 2, 1),
-            bid!(2, 3, 2), // The two below have the same bid, and we expect tiebreaks by timestamp if this is the case.
-            bid!(3, 3, 3),
-            bid!(4, 5, 4), // The two below have the same bid.
-            bid!(5, 5, 5),
-            bid!(6, 7, 6), // Highest bid, will come first in the output.
+            bid!("b", 2, 1),
+            bid!("c", 3, 2), // The two below have the same bid, and we expect tiebreaks by timestamp if this is the case.
+            bid!("d", 3, 3),
+            bid!("e", 5, 4), // The two below have the same bid.
+            bid!("f", 5, 5),
+            bid!("g", 7, 6), // Highest bid, will come first in the output.
         ];
         for tx in original_txs.iter() {
             sender.send(tx.clone()).unwrap();
@@ -540,7 +540,7 @@ mod tests {
         // Assert the output is the same as the reversed input, as
         // the highest bid txs will be released first.
         let got = txs.into_iter().map(|tx| tx.id).collect::<Vec<_>>();
-        let want: Vec<u64> = vec![6, 4, 5, 2, 3, 1, 0];
+        let want = vec!["g", "e", "f", "c", "d", "b", "a"];
         assert_eq!(want, got);
     }
 
@@ -558,16 +558,16 @@ mod tests {
         // Prepare a list of time boostable txs with bids and timestamps
         let mut original_txs = vec![
             bid!(
-                0, /* ID */
-                1, /* bid */
-                0  /* unix timestamp millis */
+                "a", /* ID */
+                1,   /* bid */
+                0    /* unix timestamp millis */
             ),
-            bid!(1, 2, 1),
-            bid!(2, 3, 2),
-            bid!(3, 4, 3),
-            bid!(4, 5, 4),
-            bid!(5, 6, 5),
-            bid!(6, 7, 6),
+            bid!("b", 2, 1),
+            bid!("c", 3, 2),
+            bid!("d", 4, 3),
+            bid!("e", 5, 4),
+            bid!("f", 6, 5),
+            bid!("g", 7, 6),
         ];
         for tx in original_txs.iter() {
             sender.send(tx.clone()).unwrap();
