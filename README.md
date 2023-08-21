@@ -2,6 +2,8 @@
 
 This library implements the **time boost ordering policy** for blockchain transactions in Rust. 
 
+[![Security audit](https://github.com/rauljordan/timeboost-rs/actions/workflows/audit.yml/badge.svg)](https://github.com/rauljordan/timeboost-rs/actions/workflows/audit.yml)
+
 The protocol is described by a research paper titled ["Buying Time: Latency Racing vs. Bidding for Transaction Ordering"](https://arxiv.org/pdf/2306.02179.pdf)
 created by researchers at @OffchainLabs, Akaki Mamageishvili, Mahimna Kelkar, Ed Felten, and Jan Christoph Schlegel from University of London. All ideas implemented in this crate are a result of the aforementioned research.
 
