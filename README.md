@@ -4,6 +4,8 @@ This library implements the **time boost ordering policy** for blockchain transa
 
 [![Security audit](https://github.com/rauljordan/timeboost-rs/actions/workflows/audit.yml/badge.svg)](https://github.com/rauljordan/timeboost-rs/actions/workflows/audit.yml)
 
+[![Rust](https://github.com/rauljordan/timeboost-rs/actions/workflows/general.yml/badge.svg)](https://github.com/rauljordan/timeboost-rs/actions/workflows/general.yml)
+
 The protocol is described by a research paper titled ["Buying Time: Latency Racing vs. Bidding for Transaction Ordering"](https://arxiv.org/pdf/2306.02179.pdf)
 created by researchers at @OffchainLabs, Akaki Mamageishvili, Mahimna Kelkar, Ed Felten, and Jan Christoph Schlegel from University of London. All ideas implemented in this crate are a result of the aforementioned research.
 
@@ -23,6 +25,28 @@ Credits to Ed Felten for the idea.
 [Rust](https://www.rust-lang.org/tools/install) stable version `1.71.1`
 
 ## Usage
+
+The main way of using the library is by initializing a `TimeBoostService` struct with a transaction 
+output feed channel.
+
+```rust
+use timeboost_rs::TimeBoostService;
+use tokio::sync::broadcast;
+
+let (tx_output_feed, mut rx) = broadcast::channel(100);
+let mut service = TimeBoostService::new(tx_output_feed);
+```
+
+The service can be configured with options to customize the max boost factor, `G`, or the capacity of the
+transaction input channel:
+
+```rust
+let mut service = TimeBoostService::new(tx_output_feed)
+                    .input_feed_buffer_capacity(1000)
+                    .g_factor(200 /* millis */);
+```
+
+Here's a full example of using time boost, sending txs into it, and receiving its output:
 
 ```rust
 use timeboost_rs::{TimeBoostService, BoostableTx};
@@ -65,6 +89,20 @@ async fn main() {
     let want = txs.into_iter().map(|tx| tx.id).collect::<Vec<_>>();
     let got = got_txs.into_iter().map(|tx| tx.id).collect::<Vec<_>>();
     assert_eq!(want, got);
+}
+```
+
+## Metrics
+
+The library exposes a `TIME_BOOST_ROUNDS_TOTAL` prometheus counter for inspecting the number of rounds elapsed.
+
+```rust
+lazy_static! {
+    static ref TIME_BOOST_ROUNDS_TOTAL: IntCounter = register_int_counter!(
+        "timeboost_rounds_total",
+        "Number of time boost rounds elapsed"
+    )
+    .unwrap();
 }
 ```
 

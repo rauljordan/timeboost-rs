@@ -107,11 +107,19 @@ impl TimeBoostService {
     /// Customize the buffer capacity of the input channel for the time boost service to receive transactions.
     /// [`TimeBoostService`] is listening for newly received txs in a select statement via this feed.
     /// Adjust this parameter to an estimated max throughput of txs that is satisfactory every G milliseconds.
+    /// It is set to a default of DEFAULT_INPUT_FEED_BUFFER_CAP if not set.
     #[allow(dead_code)]
     fn input_feed_buffer_capacity(mut self, buffer_size: usize) -> Self {
         let (tx_sender, txs_recv) = bounded(buffer_size);
         self.tx_sender = tx_sender;
         self.txs_recv = txs_recv;
+        self
+    }
+    /// Customize the max boost factor, known as G in the time boost specification paper. It is set to a default of
+    /// DEFAULT_MAX_BOOST_FACTOR milliseconds if not set.
+    #[allow(dead_code)]
+    fn g_factor(mut self, g_factor: u64) -> Self {
+        self.g_factor = g_factor;
         self
     }
     // Entities wishing to send boostable txs to the timeboost service can acquire
