@@ -1,7 +1,7 @@
-/// timeboost-rs implements a discrete version time boost protocol for blockchain transactions as specified in:
-/// https://arxiv.org/pdf/2306.02179.pdf. Instead of individually boosting transactions, the discrete
-/// version of the protocol operates in fixed rounds of length G milliseconds, where G is the parameter
-/// defined in the paper.
+//! timeboost-rs implements the time boost protocol for ordering blockchain transactions as specified in the paper
+//! titled "Buying Time: Latency Racing vs. Bidding for Transaction Ordering" published at https://arxiv.org/pdf/2306.02179.pdf.
+//! Instead of individually boosting transactions, this implementation of the protocol
+//! operates in fixed rounds of length G milliseconds, where G is the parameter defined in the paper.
 use std::cmp::{Eq, Ord, Ordering, PartialOrd};
 use std::collections::BinaryHeap;
 use std::sync::Mutex;
@@ -24,11 +24,12 @@ lazy_static! {
 }
 
 /// A default max boost factor, set to 500ms after empirical evaluations for Ethereum Layer 2s from
-/// the time boost paper.
+/// the time boost paper. Can be adjusted using the `g_factor` method when building
+/// a TimeBoostService struct.
 pub const DEFAULT_MAX_BOOST_FACTOR: u64 = 500;
 
 /// The default capacity for the transaction input channel used by [`TimeBoostService`] to receive txs
-/// from outside sources. Can be adjusted using the [`input_feed_buffer_capacity`] method when building
+/// from outside sources. Can be adjusted using the `input_feed_buffer_capacity` method when building
 /// a TimeBoostService struct.
 pub const DEFAULT_INPUT_FEED_BUFFER_CAP: usize = 1000;
 
