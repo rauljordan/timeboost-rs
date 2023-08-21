@@ -2,7 +2,7 @@
 name = "timeboost-rs"
 version = "0.1.0"
 edition = "2021"
-authors = ["rauljordan]
+authors = ["rauljordan"]
 description = "A Rust implementation of the discrete time boost protocol for blockchain transactions"
 license = "MIT OR Apache-2.0"
 keywords = ["blockchain", "ethereum"]
