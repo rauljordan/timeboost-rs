@@ -10,7 +10,7 @@ keywords = ["blockchain", "ethereum"]
 categories = ["cryptography::cryptocurrencies", "asynchronous", "algorithms"]
 
 [dependencies]
-chrono = "0.4.26"
+chrono = { version = "0.4.26", default-features = false, features = ["clock"] }
 crossbeam-channel = "0.5.8"
 lazy_static = "1.4.0"
 prometheus = "0.13.3"
