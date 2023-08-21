@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use chrono::{NaiveDateTime, Utc};
-use crossbeam_channel::{select, Receiver, Sender};
+use crossbeam_channel::{bounded, select, Receiver, Sender};
 use lazy_static::lazy_static;
 use prometheus::register_int_counter;
 use prometheus::{self, IntCounter};
@@ -50,7 +50,7 @@ pub struct TimeBoostService {
 impl TimeBoostService {
     /// Takes in an output feed for broadcasting txs released by the TimeBoostService.
     pub fn new(output_feed: broadcast::Sender<BoostableTx>) -> Self {
-        let (tx_sender, txs_recv) = crossbeam_channel::bounded(DEFAULT_INPUT_FEED_BUFFER_CAP);
+        let (tx_sender, txs_recv) = bounded(DEFAULT_INPUT_FEED_BUFFER_CAP);
         TimeBoostService {
             g_factor: DEFAULT_MAX_BOOST_FACTOR,
             tx_sender,
@@ -64,7 +64,7 @@ impl TimeBoostService {
     /// Adjust this parameter to an estimated max throughput of txs that is satisfactory every G milliseconds.
     #[allow(dead_code)]
     fn input_feed_buffer_capacity(mut self, buffer_size: usize) -> Self {
-        let (tx_sender, txs_recv) = crossbeam_channel::bounded(buffer_size);
+        let (tx_sender, txs_recv) = bounded(buffer_size);
         self.tx_sender = tx_sender;
         self.txs_recv = txs_recv;
         self
