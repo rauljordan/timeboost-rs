@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use chrono::{NaiveDateTime, Utc};
-use crossbeam_channel::{bounded, select, Receiver, Sender};
+use crossbeam_channel::{after, bounded, select, Receiver, Sender};
 use lazy_static::lazy_static;
 use prometheus::register_int_counter;
 use prometheus::{self, IntCounter};
@@ -93,18 +93,23 @@ pub struct TimeBoostService {
     txs_recv: Receiver<BoostableTx>,
     tx_heap: Mutex<BinaryHeap<BoostableTx>>,
     output_feed: broadcast::Sender<BoostableTx>,
+    next_round_sender: Sender<()>,
+    start_next_round: Receiver<()>,
 }
 
 impl TimeBoostService {
     /// Takes in an output feed for broadcasting txs released by the TimeBoostService.
     pub fn new(output_feed: broadcast::Sender<BoostableTx>) -> Self {
         let (tx_sender, txs_recv) = bounded(DEFAULT_INPUT_FEED_BUFFER_CAP);
+        let (next_round_sender, start_next_round) = bounded(1);
         TimeBoostService {
             g_factor: DEFAULT_MAX_BOOST_FACTOR,
             tx_sender,
             txs_recv,
             tx_heap: Mutex::new(BinaryHeap::new()),
             output_feed,
+            next_round_sender,
+            start_next_round,
         }
     }
     /// Customize the buffer capacity of the input channel for the time boost service to receive transactions.
@@ -130,11 +135,17 @@ impl TimeBoostService {
     pub fn sender(&self) -> Sender<BoostableTx> {
         self.tx_sender.clone()
     }
+    // Entities wishing to send boostable txs to the timeboost service can acquire
+    // a handle to the sender channel via this method.
+    pub fn next_round_notifier(&self) -> Sender<()> {
+        self.next_round_sender.clone()
+    }
     /// Runs the loop of the timeboost service, which will collect received txs from an input
     /// channel into a priority queue that sorts them by max bid. At intervals of G milliseconds, the service will
     /// release all the txs in the priority queue into a broadcast channel.
     pub fn run(&mut self) {
-        'next: loop {
+        let mut release_txs = after(Duration::from_millis(self.g_factor));
+        loop {
             select! {
                 // Transactions received from an input channel are pushed into
                 // a priority queue by max bid where ties are broken by timestamp.
@@ -145,9 +156,14 @@ impl TimeBoostService {
                         Err(e) => error!("TimeBoostService got receive error from tx input channel: {}", e),
                     }
                 },
-                default(Duration::from_millis(self.g_factor)) => {
-                    // We release all the txs in the priority queue into the output sequence
-                    // until the queue is empty and then we can restart the timer once again.
+                // We await external notification of when the service should start the next
+                // round of time boost accordingly.
+                recv(self.start_next_round) -> _ => {
+                    release_txs = after(Duration::from_millis(self.g_factor));
+                },
+                // We release all the txs in the priority queue into the output sequence
+                // until the queue is empty and then we can restart the timer once again.
+                recv(release_txs) -> _ => {
                     let mut heap = self.tx_heap.lock().unwrap();
                     while let Some(tx) = heap.pop() {
                         let timestamp = Utc::now().naive_utc();
@@ -168,7 +184,6 @@ impl TimeBoostService {
                         }
                     }
                     TIME_BOOST_ROUNDS_TOTAL.inc();
-                    continue 'next;
                 }
             }
         }
@@ -311,6 +326,7 @@ mod tests {
 
         // Obtain a channel handle to send txs to the TimeBoostService.
         let sender = service.sender();
+        let next_round_notifier = service.next_round_notifier();
 
         // Spawn a dedicated thread for the time boost service.
         std::thread::spawn(move || service.run());
@@ -335,6 +351,9 @@ mod tests {
 
         // Wait a boost round and then send the tx.
         tokio::time::sleep(Duration::from_millis(DEFAULT_MAX_BOOST_FACTOR + 100)).await;
+
+        // Notify the next round of time boost should start.
+        next_round_notifier.send(()).unwrap();
 
         sender.send(late_tx).unwrap();
 
@@ -362,6 +381,7 @@ mod tests {
 
         // Obtain a channel handle to send txs to the TimeBoostService.
         let sender = service.sender();
+        let next_round_notifier = service.next_round_notifier();
 
         // Spawn a dedicated thread for the time boost service.
         std::thread::spawn(move || service.run());
@@ -396,14 +416,22 @@ mod tests {
         for tx in round1_txs.iter() {
             sender.send(tx.clone()).unwrap();
         }
+
         // Wait > boost round and then send the next round of txs.
         tokio::time::sleep(Duration::from_millis(DEFAULT_MAX_BOOST_FACTOR + 100)).await;
+
+        // Notify the next round of time boost should start.
+        next_round_notifier.send(()).unwrap();
 
         for tx in round2_txs.iter() {
             sender.send(tx.clone()).unwrap();
         }
+
         // Wait > boost round and then send the tx.
         tokio::time::sleep(Duration::from_millis(DEFAULT_MAX_BOOST_FACTOR + 100)).await;
+
+        // Notify the next round of time boost should start.
+        next_round_notifier.send(()).unwrap();
 
         for tx in round3_txs.iter() {
             sender.send(tx.clone()).unwrap();
